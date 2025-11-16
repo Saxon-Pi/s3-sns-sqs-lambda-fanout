@@ -36,6 +36,18 @@ export class S3SnsSqsLambdaFanoutStack extends cdk.Stack {
 			},
 		})
 
+    // sqs: grayscale
+		const dlqGrayscale = new sqs.Queue(this, `${PREFIX}-dlq-grayscale`, {
+			queueName: `${PREFIX}-dlq-grayscale`,
+		})
+		const queueGrayscale = new sqs.Queue(this, `${PREFIX}-queue-grayscale`, {
+			queueName: `${PREFIX}-queue-grayscale`,
+			deadLetterQueue: {
+				queue: dlqGrayscale,
+				maxReceiveCount: 1, // DLQに移す失敗回数
+			},
+		})
+
 		// sns
 		const topic = new sns.Topic(this, `${PREFIX}-topic`, {
 			topicName: `${PREFIX}`,
@@ -59,14 +71,32 @@ export class S3SnsSqsLambdaFanoutStack extends cdk.Stack {
 			memorySize: 128,
 			timeout: cdk.Duration.seconds(30),
 			environment: {
+        QUEUE_URL: queueGrayscale.queueUrl // grayscale 用の SQS にメッセージを送信するための URL
 			}
 		});
+    
 		// Lambda関数にS3バケットの読み書き権限を付与する
 		_bucket.grantPut(_resizeLambda) 
 		_bucket.grantReadWrite(_resizeLambda)
-
+    // Lambda関数からSQSにメッセージを送信する権限を付与する
+		queueGrayscale.grantSendMessages(_resizeLambda) 
 		// Lambda関数を起動するイベントをSQSに指定する
 		_resizeLambda.addEventSource(new SqsEventSource(queueResize))
+
+    // lambda grayscale
+		const grayscaleLambda = new NodejsFunction(this, `${PREFIX}-lambda-grayscale`, {
+			functionName: `${PREFIX}-grayscale`,
+			entry: path.join(REPOSITORY_TOP, "lambdas/grayscale/src/index.ts"),
+			handler: "handler",
+			runtime: lambda.Runtime.NODEJS_20_X,
+			memorySize: 128,
+			timeout: cdk.Duration.seconds(30),
+		});
+		// Lambda関数にS3バケットの読み書き権限を付与する
+		_bucket.grantPut(grayscaleLambda) 
+		_bucket.grantReadWrite(grayscaleLambda)
+		// Lambda関数を起動するイベントをSQSに指定する
+		grayscaleLambda.addEventSource(new SqsEventSource(queueGrayscale))
 
 	}
 }
