@@ -48,6 +48,18 @@ export class S3SnsSqsLambdaFanoutStack extends cdk.Stack {
 			},
 		})
 
+    // sqs: blur
+		const dlqBlur = new sqs.Queue(this, `${PREFIX}-dlq-blur`, {
+			queueName: `${PREFIX}-dlq-blur`,
+		})
+		const queueBlur = new sqs.Queue(this, `${PREFIX}-queue-blur`, {
+			queueName: `${PREFIX}-queue-blur`,
+			deadLetterQueue: {
+				queue: dlqBlur,
+				maxReceiveCount: 1, // DLQに移す失敗回数
+			},
+		})
+
 		// sns
 		const topic = new sns.Topic(this, `${PREFIX}-topic`, {
 			topicName: `${PREFIX}`,
@@ -61,6 +73,7 @@ export class S3SnsSqsLambdaFanoutStack extends cdk.Stack {
 		// snsのトピックをsqsでサブスクライブする
 		// rawMessageDelivery を true にすることで S3Event をそのまま SQS に送信できる
 		topic.addSubscription(new SqsSubscription(queueResize, { rawMessageDelivery: true }))
+    topic.addSubscription(new SqsSubscription(queueBlur, { rawMessageDelivery: true }))
 
 		// lambda: resize
 		const _resizeLambda = new NodejsFunction(this, `${PREFIX}-lambda-resize`, {
@@ -97,6 +110,23 @@ export class S3SnsSqsLambdaFanoutStack extends cdk.Stack {
 		_bucket.grantReadWrite(grayscaleLambda)
 		// Lambda関数を起動するイベントをSQSに指定する
 		grayscaleLambda.addEventSource(new SqsEventSource(queueGrayscale))
+
+    // lambda: blur
+		const _blurLambda = new NodejsFunction(this, `${PREFIX}-lambda-blur`, {
+			functionName: `${PREFIX}-blur`,
+			entry: path.join(REPOSITORY_TOP, "lambdas/blur/src/index.ts"),
+			handler: "handler",
+			runtime: lambda.Runtime.NODEJS_20_X,
+			memorySize: 128,
+			timeout: cdk.Duration.seconds(30),
+			environment: {
+			}
+		});
+		// Lambda関数にS3バケットの読み書き権限を付与する
+		_bucket.grantPut(_blurLambda) 
+		_bucket.grantReadWrite(_blurLambda)
+		// Lambda関数を起動するイベントをSQSに指定する
+		_blurLambda.addEventSource(new SqsEventSource(queueBlur))
 
 	}
 }
