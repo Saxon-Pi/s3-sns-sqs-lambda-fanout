@@ -60,6 +60,18 @@ export class S3SnsSqsLambdaFanoutStack extends cdk.Stack {
 			},
 		})
 
+    // sqs: rotate
+		const dlqRotate = new sqs.Queue(this, `${PREFIX}-dlq-rotate`, {
+			queueName: `${PREFIX}-dlq-rotate`,
+		})
+		const queueRotate = new sqs.Queue(this, `${PREFIX}-queue-rotate`, {
+			queueName: `${PREFIX}-queue-rotate`,
+			deadLetterQueue: {
+				queue: dlqRotate,
+				maxReceiveCount: 1, // DLQに移す失敗回数
+			},
+		})
+
 		// sns
 		const topic = new sns.Topic(this, `${PREFIX}-topic`, {
 			topicName: `${PREFIX}`,
@@ -120,13 +132,31 @@ export class S3SnsSqsLambdaFanoutStack extends cdk.Stack {
 			memorySize: 128,
 			timeout: cdk.Duration.seconds(30),
 			environment: {
+        QUEUE_URL: queueRotate.queueUrl
 			}
 		});
 		// Lambda関数にS3バケットの読み書き権限を付与する
 		_bucket.grantPut(_blurLambda) 
 		_bucket.grantReadWrite(_blurLambda)
+    // Lambda関数からSQSにメッセージを送信する権限を付与する
+		queueRotate.grantSendMessages(_blurLambda) 
 		// Lambda関数を起動するイベントをSQSに指定する
 		_blurLambda.addEventSource(new SqsEventSource(queueBlur))
+
+    // lambda rotate
+		const rotateLambda = new NodejsFunction(this, `${PREFIX}-lambda-rotate`, {
+			functionName: `${PREFIX}-rotate`,
+			entry: path.join(REPOSITORY_TOP, "lambdas/rotate/src/index.ts"),
+			handler: "handler",
+			runtime: lambda.Runtime.NODEJS_20_X,
+			memorySize: 128,
+			timeout: cdk.Duration.seconds(30),
+		});
+		// Lambda関数にS3バケットの読み書き権限を付与する
+		_bucket.grantPut(rotateLambda) 
+		_bucket.grantReadWrite(rotateLambda)
+		// Lambda関数を起動するイベントをSQSに指定する
+		rotateLambda.addEventSource(new SqsEventSource(queueRotate))
 
 	}
 }

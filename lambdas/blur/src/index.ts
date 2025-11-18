@@ -45,6 +45,23 @@ export const handler: SQSHandler = async(event: SQSEvent) => {
 			const uploadKey = `${PROCESS}/${parsedKey.name}-${PROCESS}${parsedKey.ext}` 
 
 			await putImageToS3(s3Client, bucketName, uploadKey, imageBuffer)
+
+			// 4. send message to SQS
+			const s3Message: S3Message = {
+				bucketName,
+				key: uploadKey,
+			}
+			// SQS client
+			const sqsClient = new SQSClient()
+			// SQS command
+			const input: SendMessageCommandInput = {
+				QueueUrl: QUEUE_URL,
+				MessageBody: JSON.stringify(s3Message) ,
+			}
+			const command: SendMessageCommand = new SendMessageCommand(input)
+			// send
+			await sqsClient.send(command)
+			console.log(`sent the message to SQS, message: ${JSON.stringify(s3Message)}`)
 			
 		}
 		
