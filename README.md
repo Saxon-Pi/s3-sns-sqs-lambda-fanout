@@ -13,6 +13,7 @@ S3 へのファイルアップロードをトリガーに、SNS → SQS → Lamb
 
 ## アーキテクチャ
 
+```mermaid
 flowchart LR
     %% ========= 共通 =========
     s3[S3 Bucket<br/>prefix: original/]
@@ -76,3 +77,4 @@ flowchart LR
 
     %% ========= S3 イベント起点 =========
     s3 -- ObjectUpload --> sns
+```
