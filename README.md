@@ -13,52 +13,66 @@ S3 へのファイルアップロードをトリガーに、SNS → SQS → Lamb
 
 ## アーキテクチャ
 
-### Resize / Grayscale パイプライン
-
-```mermaid
 flowchart LR
+    %% ========= 共通 =========
     s3[S3 Bucket<br/>prefix: original/]
     sns[SNS Topic]
-    qResize[SQS Queue<br/>resize]
-    qResizeDLQ[DLQ<br/>resize]
-    lResize[Lambda<br/>resize]
-    qGray[SQS Queue<br/>grayscale]
-    qGrayDLQ[DLQ<br/>grayscale]
-    lGray[Lambda<br/>grayscale]
-    s3out[(S3 Bucket<br/>processed images)]
 
-    s3 -- ObjectCreated --> sns
-    sns --> qResize
-    qResize --> lResize
-    lResize --> qGray
-    qGray --> lGray
-    lGray --> s3out
+    %% ========= Resize → Grayscale =========
+    subgraph Resize_Grayscale_Flow[Resize → Grayscale flow]
+        qResize[SQS Queue<br/>resize]
+        qResizeDLQ[DLQ<br/>resize]
 
-    qResize -. failed .-> qResizeDLQ
-    qGray -. failed .-> qGrayDLQ
-```
+        lResize[Lambda<br/>resize<br/>output: resize/]
 
-### Blur / Rotate パイプライン
+        qGray[SQS Queue<br/>grayscale]
+        qGrayDLQ[DLQ<br/>grayscale]
 
-```mermaid
-flowchart LR
-    s3b[S3 Bucket<br/>prefix: original/]
-    snsB[SNS Topic]
-    qBlur[SQS Queue<br/>blur]
-    qBlurDLQ[DLQ<br/>blur]
-    lBlur[Lambda<br/>blur]
-    qRotate[SQS Queue<br/>rotate]
-    qRotateDLQ[DLQ<br/>rotate]
-    lRotate[Lambda<br/>rotate]
-    s3outB[(S3 Bucket<br/>processed images)]
+        lGray[Lambda<br/>grayscale]
 
-    s3b -- ObjectCreated --> snsB
-    snsB --> qBlur
-    qBlur --> lBlur
-    lBlur --> qRotate
-    qRotate --> lRotate
-    lRotate --> s3outB
+        s3outGray[(S3 Bucket<br/>prefix: grayscale/)]
 
-    qBlur -. failed .-> qBlurDLQ
-    qRotate -. failed .-> qRotateDLQ
-```
+        sns --> qResize
+        qResize --> lResize
+
+        %% Resize Lambda → 次ステップ(SQS grayscale)
+        lResize -- send message --> qGray
+
+        qGray --> lGray
+        lGray --> s3outGray
+
+        %% DLQ
+        qResize -. failed .-> qResizeDLQ
+        qGray -. failed .-> qGrayDLQ
+    end
+
+    %% ========= Blur → Rotate =========
+    subgraph Blur_Rotate_Flow[Blur → Rotate flow]
+        qBlur[SQS Queue<br/>blur]
+        qBlurDLQ[DLQ<br/>blur]
+
+        lBlur[Lambda<br/>blur<br/>output: blur/]
+
+        qRotate[SQS Queue<br/>rotate]
+        qRotateDLQ[DLQ<br/>rotate]
+
+        lRotate[Lambda<br/>rotate]
+
+        s3outRotate[(S3 Bucket<br/>prefix: rotate/)]
+
+        sns --> qBlur
+        qBlur --> lBlur
+
+        %% Blur Lambda → 次ステップ(SQS rotate)
+        lBlur -- send message --> qRotate
+
+        qRotate --> lRotate
+        lRotate --> s3outRotate
+
+        %% DLQ
+        qBlur -. failed .-> qBlurDLQ
+        qRotate -. failed .-> qRotateDLQ
+    end
+
+    %% ========= S3 イベント起点 =========
+    s3 -- ObjectUpload --> sns
